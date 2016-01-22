@@ -1,58 +1,189 @@
 ---
 jobs:
 
-- name: unit-build-code
+# Bring down the customer code and register it as a resource.
+- name: clone-customer-code
   public: true
   serial: true
-  plan: 
+  plan:
+   - get: customer-code
+
+# Run the appropriate 'build' phase command for this repo.
+- name: job-build-code
+  public: true
+  serial: true
+  plan:
   - get: customer-code
+    passed: [clone-customer-code]
+
   - task: build-customer-code
     file: customer-code/build.yml
-    outputs: 
-      name: built-code
+    on_failure:
+      task: fire-build-failed-notification
+      file: notifications/build-failed.yml
 
-- name: unit-test-code
+# Run the appropriate 'test' phase command for this repo.
+- name: job-test-code
   public: true
   serial: true
   plan:
   - get: customer-code
-    passed: [unit-build-code]
+    passed: [job-build-code]
   - task: test-customer-code
     file: customer-code/test.yml
+    on_failure:
+      task: fire-test-failed-notification
+      file: notifications/test-failed.yml
 
-- name: unit-deploy-code
+# Deploy the application to Cloud Foundry.
+- name: job-deploy-code
   public: true
   serial: true
   plan:
   - get: customer-code
-    passed: [unit-test-code]
+    passed: [job-test-code]
   - put: deploy-app-to-cloud-foundry
 
+##### This section deals with the various notifications we fire for the build process #####
+# Update the build status to 'Building'
+- name: BUILDING
+  serial: true
+  plan:
+   - aggregate:
+      - get: customer-code
+        passed: [clone-customer-code]
+      - put: update-build-status
+      - put: fire-notification
 
+- name: BUILD-FAILED
+  serial: true
+  plan:
+   - aggregate:
+      - get: customer-code
+        failed: [job-build-code]
+      - put: update-build-status
+      - put: fire-notification
 
+# Update the build status to 'Testing'
+- name: TESTING
+  serial: true
+  plan:
+   - aggregate:
+      - get: customer-code
+        passed: [job-build-code]
+      - put: update-build-status
+      - put: fire-notification
+
+- name: TEST-FAILED
+  serial: true
+  plan:
+   - aggregate:
+      - get: customer-code
+        failed: [job-test-code]
+      - put: update-build-status
+      - put: fire-notification
+
+# Update the build status to 'Deploying'
+- name: DEPLOYING
+  serial: true
+  plan:
+   - aggregate:
+      - get: customer-code
+        passed: [job-test-code]
+      - put: update-build-status
+      - put: fire-notification
+
+- name: DEPLOY-FAILED
+  serial: true
+  plan:
+   - aggregate:
+      - get: customer-code
+        failed: [job-deploy-code]
+      - put: update-build-status
+      - put: fire-notification
+
+# Update the build status to 'Success'
+- name: SUCCESS
+  serial: true
+  plan:
+   - aggregate:
+      - get: deploy-app-to-cloud-foundry
+        passed: [job-deploy-code]
+      - put: update-build-status
+      - put: fire-notification
+
+# Fire the BUILD_STARTED notifications
+- name: BUILD_STARTED
+  serial: true
+  plan:
+    - aggregate:
+        - get: customer-code
+          passed: [clone-customer-code]
+        - put: fire-notification
+
+# Fire the BUILD_COMPLETE notifications
+- name: BUILD_COMPLETE
+  serial: true
+  plan:
+    - aggregate:
+        - get: customer-code
+          passed: [job-build-code]
+        - put: fire-notification
+
+# Fire the TEST_STARTED notifications
+- name: TEST_STARTED
+  serial: true
+  plan:
+    - aggregate:
+        - get: customer-code
+          passed: [job-build-code]
+        - put: fire-notification
+
+# Fire the TEST_COMPLETE notifications
+- name: TEST_COMPLETE
+  serial: true
+  plan:
+    - aggregate:
+        - get: customer-code
+          passed: [job-test-code]
+        - put: fire-notification
+
+# Fire the DEPLOY_STARTED notifications
+- name: DEPLOY_STARTED
+  serial: true
+  plan:
+    - aggregate:
+        - get: customer-code
+          passed: [job-test-code]
+        - put: fire-notification
+
+# Fire the DEPLOY_COMPLETE notifications
+- name: DEPLOY_COMPLETE
+  serial: true
+  plan:
+    - aggregate:
+        - get: deploy-app-to-cloud-foundry
+          passed: [job-deploy-code]
+        - put: fire-notification
+
+#### This section describes the various resources used by the build pipeline ####
 resources:
+
+- name: update-build-status
+  type: git
+
+- name: fire-notification
+  type: git
+
+# This git repo describes the customer code that we pull down for this build job.
 - name: customer-code
   type: git
   source:
     uri: https://github.com/phanatic/node-env
 
-- name: docker-build-code
-  type: docker-image
-  source:
-    repository: concourse/git-resource
-    email: docker@example.com
-    username: username
-    password: password
-
-- name: docker-test-code
-  type: docker-image
-  source:
-    repository: concourse/git-resource
-    email: docker@example.com
-    username: username
-    password: password
-
-
+# This is an in-built cloud foundry resource type that deploys a folder to cloud foundry
+# as a cf application
+# https://github.com/concourse/cf-resource
 - name: deploy-app-to-cloud-foundry
   type: cf
   source:
