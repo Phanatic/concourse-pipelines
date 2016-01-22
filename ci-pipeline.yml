@@ -1,0 +1,64 @@
+---
+jobs:
+
+- name: unit-build-code
+  public: true
+  serial: true
+  plan: 
+  - get: customer-code
+  - task: build-customer-code
+    file: customer-code/build.yml
+    outputs: 
+      name: built-code
+
+- name: unit-test-code
+  public: true
+  serial: true
+  plan:
+  - get: customer-code
+    passed: [unit-build-code]
+  - task: test-customer-code
+    file: customer-code/test.yml
+
+- name: unit-deploy-code
+  public: true
+  serial: true
+  plan:
+  - get: customer-code
+    passed: [unit-test-code]
+  - put: deploy-app-to-cloud-foundry
+
+
+
+resources:
+- name: customer-code
+  type: git
+  source:
+    uri: https://github.com/phanatic/node-env
+
+- name: docker-build-code
+  type: docker-image
+  source:
+    repository: concourse/git-resource
+    email: docker@example.com
+    username: username
+    password: password
+
+- name: docker-test-code
+  type: docker-image
+  source:
+    repository: concourse/git-resource
+    email: docker@example.com
+    username: username
+    password: password
+
+
+- name: deploy-app-to-cloud-foundry
+  type: cf
+  source:
+    api: https://api.15.125.72.200.xip.io
+    username: phani.raj@hp.com
+    password: jababy
+    organization: DevEx
+    space: Dogfood
+    skip_cert_check: true
