@@ -15,12 +15,8 @@ jobs:
   plan:
   - get: customer-code
     passed: [clone-customer-code]
-
   - task: build-customer-code
     file: customer-code/build.yml
-    on_failure:
-      task: fire-build-failed-notification
-      file: notifications/build-failed.yml
 
 # Run the appropriate 'test' phase command for this repo.
 - name: job-test-code
@@ -31,9 +27,6 @@ jobs:
     passed: [job-build-code]
   - task: test-customer-code
     file: customer-code/test.yml
-    on_failure:
-      task: fire-test-failed-notification
-      file: notifications/test-failed.yml
 
 # Deploy the application to Cloud Foundry.
 - name: job-deploy-code
@@ -43,6 +36,16 @@ jobs:
   - get: customer-code
     passed: [job-test-code]
   - put: deploy-app-to-cloud-foundry
+
+# Run the appropriate 'test' phase command for this repo.
+- name: job-storm-runner
+  public: true
+  serial: true
+  plan:
+  - get: deploy-app-to-cloud-foundry
+    passed: [job-deploy-code]
+  - task: run-storm-runner-on-customer-code
+    file: customer-code/storm_runner.yml
 
 ##### This section deals with the various notifications we fire for the build process #####
 # Update the build status to 'Building'
@@ -102,8 +105,8 @@ jobs:
       - put: update-build-status
       - put: fire-notification
 
-# Update the build status to 'Success'
-- name: SUCCESS
+# Update the build status to 'DEPLOY successful'
+- name: DEPLOY-COMPLETE
   serial: true
   plan:
    - aggregate:
@@ -111,6 +114,42 @@ jobs:
         passed: [job-deploy-code]
       - put: update-build-status
       - put: fire-notification
+
+- name: Start_PostDeployAction
+  serial: true
+  plan:
+    - aggregate:
+       - get: deploy-app-to-cloud-foundry
+         passed: [job-deploy-code]
+       - put: update-build-status
+       - put: fire-notification
+
+# Update the build status to 'Success'
+- name: SUCCESS
+  serial: true
+  plan:
+   - aggregate:
+      - get: deploy-app-to-cloud-foundry
+        passed: [job-storm-runner]
+      - put: update-build-status
+      - put: fire-notification
+
+- name: PostDeployAction_COMPLETE
+  serial: true
+  plan:
+    - aggregate:
+       - get: deploy-app-to-cloud-foundry
+         passed: [job-storm-runner]
+       - put: fire-notification
+
+- name: PostDeployAction_FAILED
+  serial: true
+  plan:
+    - aggregate:
+       - get: deploy-app-to-cloud-foundry
+         failed: [job-storm-runner]
+       - put: update-build-status
+       - put: fire-notification
 
 #### This section describes the various resources used by the build pipeline ####
 resources:
