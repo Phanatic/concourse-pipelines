@@ -9,7 +9,7 @@ resources:
     username: {{cf_target_username}}
     password: {{cf_target_password}}
     organization: {{cf_target_organization}}
-    space: {cf_target_space}
+    space: {{cf_target_space}}
     skip_cert_check: true
 
 # This is the customer code that goes through the Build->Test->Deploy process.
