@@ -1,0 +1,147 @@
+---
+resources:
+
+# This resource denotes the docker image that is produced as part of the build.
+- name: helion-ci-docker-image
+  type: docker-image
+  source:
+    repository: phanatic/helionce-node-env
+    email: phanirajuyn@gmail.com
+    username: phanatic
+    password: fairgate
+
+# This CF resource denotes the CF application that is created from the sources.
+- name: deploy-app-to-cloud-foundry
+  type: cf
+  source:
+    api: https://api.15.125.72.200.xip.io
+    username: phanatic@hp.com
+    password: jababy
+    organization: DevEx
+    space: Dogfood
+    skip_cert_check: true
+
+# This is the customer code that goes through the Build->Test->Deploy process.
+- name: helion-ci-git-repo
+  type: git
+  source:
+    uri: {{repo_url}}
+    branch: master
+    params: {depth: 3}
+
+jobs:
+
+# This job clones the repo and notifies the next job if any new commits were detected.
+- name: job-clone-repo
+  public: true
+  serial: true
+  plan:
+    - get: helion-ci-git-repo
+
+# This is the build->test-> deploy cycle job.
+- name: job-build-test-code
+  public: true
+  serial: true
+  plan:
+    - get: helion-ci-git-repo
+      passed: [job-clone-repo]
+      trigger: true
+    - task: build-code
+      config:
+        platform: linux
+        image: {{build_worker_image}}
+        inputs:
+          - name: helion-ci-git-repo
+        outputs:
+          - name: npm_install_output
+        run:
+          path: sh
+          args: ["-c", {{build_command}}]
+      on_failure:
+        task: fire-build-failed-notification
+        config:
+          platform: linux
+          image: {{build_worker_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'build FAILED'"]
+      on_success:
+        task: fire-build-complete-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Build COMPLETE'"]
+    - task: test-code
+      config:
+        platform: linux
+        image: {{build_worker_image}}
+        inputs:
+          - name: npm_install_output
+            path: $HOME
+        run:
+          path: sh
+          args: ["-c", {{test_command}}]
+      on_failure:
+        task: fire-test-failed-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Test FAILED'"]
+      on_success:
+        task: fire-test-complete-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Test COMPLETE'"]
+
+
+- name: job-deploy-app
+  public: true
+  serial: true
+  plan:
+    - get: helion-ci-git-repo
+      passed: [job-build-test-code]
+      trigger: true
+    - put: deploy-app-to-cloud-foundry
+      params:
+        manifest: helion-ci-git-repo/manifest.yml
+        path: helion-ci-git-repo
+      on_failure:
+        task: fire-deploy-failed-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Deploy FAILED'"]
+      on_success:
+        task: fire-deploy-complete-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Deploy COMPLETE'"]
+
+- name: job-test-deployed-app
+  public: true
+  serial: true
+  plan:
+    - get: deploy-app-to-cloud-foundry
+      passed: [job-deploy-app]
+      trigger: true
+    - task: test-deployed-app
+      config:
+        platform: linux
+        image: {{deploy_worker_image}}
+        inputs: []
+        outputs: []
+        run:
+          path: sh
+          args: ["-c", "curl https://helionce-node.15.125.72.200.xip.io/ --insecure"]

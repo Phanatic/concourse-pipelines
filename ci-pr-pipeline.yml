@@ -1,0 +1,167 @@
+---
+jobs:
+
+# Bring down the customer code and register it as a resource.
+- name: clone-master
+  public: true
+  serial: true
+  plan:
+    - get: master-code
+
+- name: clone-user-fork
+  public: true
+  serial: true
+  plan:
+   - get: master-code
+     passed: [clone-master]
+   - get: user-fork-code   
+
+- name: merge-user-fork
+  public: true
+  serial: true
+  plan:
+    - get: user-fork-code
+      passed: [clone-user-fork]
+    - put: user-merged-code
+
+# Run the appropriate 'build' phase command for this repo.
+- name: job-build-code
+  public: true
+  serial: true
+  plan:
+  - get: user-merged-code
+    passed: [merge-user-fork]
+
+  - task: build-customer-code
+    file: customer-code/build.yml
+    on_failure:
+      task: fire-build-failed-notification
+      file: notifications/build-failed.yml
+
+# Run the appropriate 'test' phase command for this repo.
+- name: job-test-code
+  public: true
+  serial: true
+  plan:
+  - get: user-merged-code
+    passed: [job-build-code]
+  - task: test-customer-code
+    file: customer-code/test.yml
+    on_failure:
+      task: fire-test-failed-notification
+      file: notifications/test-failed.yml
+
+# Deploy the application to Cloud Foundry.
+- name: job-deploy-code
+  public: true
+  serial: true
+  plan:
+  - get: user-merged-code
+    passed: [job-test-code]
+  - put: deploy-app-to-cloud-foundry
+
+##### This section deals with the various notifications we fire for the build process #####
+# Update the build status to 'Building'
+- name: BUILDING
+  serial: true
+  plan:
+   - aggregate:
+      - get: user-merged-code
+        passed: [merge-user-fork]
+      - put: update-build-status
+      - put: fire-notification
+
+- name: BUILD-FAILED
+  serial: true
+  plan:
+   - aggregate:
+      - get: user-merged-code
+        failed: [job-build-code]
+      - put: update-build-status
+      - put: fire-notification
+
+# Update the build status to 'Testing'
+- name: TESTING
+  serial: true
+  plan:
+   - aggregate:
+      - get: user-merged-code
+        passed: [job-build-code]
+      - put: update-build-status
+      - put: fire-notification
+
+- name: TEST-FAILED
+  serial: true
+  plan:
+   - aggregate:
+      - get: user-merged-code
+        failed: [job-test-code]
+      - put: update-build-status
+      - put: fire-notification
+
+# Update the build status to 'Deploying'
+- name: DEPLOYING
+  serial: true
+  plan:
+   - aggregate:
+      - get: user-merged-code
+        passed: [job-test-code]
+      - put: update-build-status
+      - put: fire-notification
+
+- name: DEPLOY-FAILED
+  serial: true
+  plan:
+   - aggregate:
+      - get: user-merged-code
+        failed: [job-deploy-code]
+      - put: update-build-status
+      - put: fire-notification
+
+# Update the build status to 'Success'
+- name: SUCCESS
+  serial: true
+  plan:
+   - aggregate:
+      - get: deploy-app-to-cloud-foundry
+        passed: [job-deploy-code]
+      - put: update-build-status
+      - put: fire-notification
+
+#### This section describes the various resources used by the build pipeline ####
+resources:
+
+- name: update-build-status
+  type: git
+
+- name: fire-notification
+  type: git
+
+- name: user-merged-code
+  type: git
+  source:
+    uri: https://github.com/phanatic/node-env
+# This git repo describes the customer code that we pull down for this build job.
+- name: master-code
+  type: git
+  source:
+    uri: https://github.com/phanatic/node-env
+
+# This git repo describes the customer code that we pull down for this build job.
+- name: user-fork-code
+  type: git
+  source:
+    uri: https://github.com/phanatic/node-env
+
+# This is an in-built cloud foundry resource type that deploys a folder to cloud foundry
+# as a cf application
+# https://github.com/concourse/cf-resource
+- name: deploy-app-to-cloud-foundry
+  type: cf
+  source:
+    api: https://api.15.125.72.200.xip.io
+    username: phani.raj@hp.com
+    password: jababy
+    organization: DevEx
+    space: Dogfood
+    skip_cert_check: true
