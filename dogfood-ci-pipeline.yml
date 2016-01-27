@@ -1,28 +1,19 @@
 ---
 resources:
 
-# This resource denotes the docker image that is produced as part of the build.
-- name: helion-ci-docker-image
-  type: docker-image
-  source:
-    repository: phanatic/helionce-node-env
-    email: phanirajuyn@gmail.com
-    username: phanatic
-    password: fairgate
-
 # This CF resource denotes the CF application that is created from the sources.
 - name: deploy-app-to-cloud-foundry
   type: cf
   source:
-    api: https://api.15.125.72.200.xip.io
-    username: phanatic@hp.com
-    password: jababy
-    organization: DevEx
-    space: Dogfood
+    api: {{cf_target_api}}
+    username: {{cf_target_username}}
+    password: {{cf_target_password}}
+    organization: {{cf_target_organization}}
+    space: {cf_target_space}
     skip_cert_check: true
 
 # This is the customer code that goes through the Build->Test->Deploy process.
-- name: helion-ci-git-repo
+- name: helionce-git-repo
   type: git
   source:
     uri: {{repo_url}}
@@ -36,14 +27,14 @@ jobs:
   public: true
   serial: true
   plan:
-    - get: helion-ci-git-repo
+    - get: helionce-git-repo
 
 # This is the build->test-> deploy cycle job.
 - name: job-build-test-code
   public: true
   serial: true
   plan:
-    - get: helion-ci-git-repo
+    - get: helionce-git-repo
       passed: [job-clone-repo]
       trigger: true
     - task: build-code
@@ -51,9 +42,9 @@ jobs:
         platform: linux
         image: {{build_worker_image}}
         inputs:
-          - name: helion-ci-git-repo
+          - name: helionce-git-repo
         outputs:
-          - name: npm_install_output
+          - name: build_code_output
         run:
           path: sh
           args: ["-c", {{build_command}}]
@@ -61,7 +52,7 @@ jobs:
         task: fire-build-failed-notification
         config:
           platform: linux
-          image: {{build_worker_image}}
+          image: {{notifier_image}}
           run:
             path: sh
             args: ["-c", "echo 'build FAILED'"]
@@ -78,7 +69,7 @@ jobs:
         platform: linux
         image: {{build_worker_image}}
         inputs:
-          - name: npm_install_output
+          - name: build_code_output
             path: $HOME
         run:
           path: sh
@@ -105,13 +96,13 @@ jobs:
   public: true
   serial: true
   plan:
-    - get: helion-ci-git-repo
+    - get: helionce-git-repo
       passed: [job-build-test-code]
       trigger: true
     - put: deploy-app-to-cloud-foundry
       params:
-        manifest: helion-ci-git-repo/manifest.yml
-        path: helion-ci-git-repo
+        manifest: helionce-git-repo/manifest.yml
+        path: helionce-git-repo
       on_failure:
         task: fire-deploy-failed-notification
         config:
