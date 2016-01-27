@@ -17,7 +17,7 @@ resources:
   type: git
   source:
     uri: {{repo_url}}
-    branch: master
+    branch: {{repo_branch}}
     params: {depth: 3}
 
 jobs:
