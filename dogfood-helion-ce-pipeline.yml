@@ -94,6 +94,8 @@ jobs:
           - name: test_code_output
             path: $HOME
         outputs: []
+        params:
+            TEST_ENDPOINT: "https://15.126.238.112/"
         run:
           path: sh
           args: ["-c", {{post_deploy_test_command}}]
