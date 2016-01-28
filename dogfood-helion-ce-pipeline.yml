@@ -1,0 +1,99 @@
+---
+resources:
+
+# This is the customer code that goes through the Build->Test->Deploy process.
+- name: helionce-git-repo
+  type: git
+  source:
+    uri: {{repo_url}}
+    branch: {{repo_branch}}
+    params: {depth: 3}
+
+jobs:
+
+# This job clones the repo and notifies the next job if any new commits were detected.
+- name: job-clone-repo
+  public: true
+  serial: true
+  plan:
+    - get: helionce-git-repo
+
+# This is the build->test-> deploy cycle job.
+- name: job-build-test-deploy-code
+  public: true
+  serial: true
+  plan:
+    - get: helionce-git-repo
+      passed: [job-clone-repo]
+      trigger: true
+    - task: build-code
+      privileged: true
+      config:
+        privileged: true
+        platform: linux
+        image: {{build_worker_image}}
+        inputs:
+          - name: helionce-git-repo
+        outputs:
+          - name: build_code_output
+        run:
+          path: sh
+          args: ["-c", {{build_command}}]
+      on_failure:
+        task: fire-build-failed-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'build FAILED'"]
+      on_success:
+        task: fire-build-complete-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Build COMPLETE'"]
+
+    - task: test-code
+      privileged: true
+      config:
+        platform: linux
+        privileged: true
+        image: {{build_worker_image}}
+        inputs:
+          - name: build_code_output
+        outputs:
+          - name: test_code_output
+        run:
+          path: sh
+          args: ["-c", {{test_command}}]
+      on_failure:
+        task: fire-test-failed-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Test FAILED'"]
+      on_success:
+        task: fire-test-complete-notification
+        config:
+          platform: linux
+          image: {{notifier_image}}
+          run:
+            path: sh
+            args: ["-c", "echo 'Test COMPLETE'"]
+
+    - task: test-deployed-app
+      config:
+        platform: linux
+        image: {{build_worker_image}}
+        inputs:
+          - name: test_code_output
+            path: $HOME
+        outputs: []
+        run:
+          path: sh
+          args: ["-c", {{post_deploy_test_command}}]
